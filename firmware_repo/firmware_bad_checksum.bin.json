@@ -1,0 +1,6 @@
+{
+  "name": "firmware_bad_checksum.bin",
+  "version": "9.9.9",
+  "md5": "bad-md5",
+  "sha256": "337d8f4d292c0598cf0851862255ab3101247c71f95dd0251ebf231d967ef494"
+}
