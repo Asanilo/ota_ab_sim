@@ -1,0 +1,31 @@
+{
+  "firmware": [
+    {
+      "version": "2.0.0",
+      "filename": "firmware_v2.bin",
+      "size": 19,
+      "md5": "abcb832ece223c927088c63fc7fcf16d",
+      "sha256": "926a83d8db81b8cf37ff750b9450ae9c908588975148c6266b32015dbdbcc621",
+      "target_slot": "A",
+      "compatible_model": "demo-board"
+    },
+    {
+      "version": "9.9.9",
+      "filename": "firmware_bad_checksum.bin",
+      "size": 19,
+      "md5": "bad-md5",
+      "sha256": "337d8f4d292c0598cf0851862255ab3101247c71f95dd0251ebf231d967ef494",
+      "target_slot": "A",
+      "compatible_model": "demo-board"
+    },
+    {
+      "version": "9.9.8",
+      "filename": "firmware_bad_sha256.bin",
+      "size": 26,
+      "md5": "ee8e9d12aea45bb9066b6cf7e799907e",
+      "sha256": "bad-sha256",
+      "target_slot": "A",
+      "compatible_model": "demo-board"
+    }
+  ]
+}

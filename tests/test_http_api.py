@@ -28,6 +28,23 @@ def write_firmware(repo: Path, name: str, version: str, content: bytes):
     (repo / f"{name}.json").write_text(json.dumps(metadata), encoding="utf-8")
 
 
+def write_index(repo: Path):
+    index = {
+        "firmware": [
+            {
+                "version": "2.0.0",
+                "filename": "firmware_v2.bin",
+                "size": len(b"firmware version 2\n"),
+                "md5": hashlib.md5(b"firmware version 2\n").hexdigest(),
+                "sha256": hashlib.sha256(b"firmware version 2\n").hexdigest(),
+                "target_slot": "A",
+                "compatible_model": "demo-board",
+            }
+        ]
+    }
+    (repo / "index.json").write_text(json.dumps(index), encoding="utf-8")
+
+
 def parse_json(stdout):
     return json.loads(stdout)
 
@@ -39,6 +56,7 @@ class HttpClientServerTests(unittest.TestCase):
         self.repo = self.base_dir / "firmware_repo"
         self.repo.mkdir()
         write_firmware(self.repo, "firmware_v2.bin", "2.0.0", b"firmware version 2\n")
+        write_index(self.repo)
 
         service = OtaService(self.base_dir)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
@@ -92,6 +110,13 @@ class HttpClientServerTests(unittest.TestCase):
 
         persisted = json.loads((self.base_dir / "data" / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(persisted["active_slot"], "A")
+
+    def test_firmware_command_lists_repository_index_fields(self):
+        response = self.run_client("firmware")
+
+        self.assertEqual(response["firmware"][0]["filename"], "firmware_v2.bin")
+        self.assertEqual(response["firmware"][0]["target_slot"], "A")
+        self.assertEqual(response["firmware"][0]["compatible_model"], "demo-board")
 
 
 class ClientSeparationTests(unittest.TestCase):

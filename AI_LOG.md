@@ -397,20 +397,169 @@ sed -n '1,120p' data/state.json
 
 **工作内容**
 
-- reviewer 意见转发给代码编写 agent。
+- 人工将 TURN-5 的 reviewer 意见转发给代码编写 agent。
 - 实现 reviewer 建议中的自动化证据补强。
 - 补真实 HTTP server + CLI 子进程测试。
 - 补 SHA256 mismatch 独立失败测试。
 - 补 client/server 边界静态测试。
 
+**给 AI 的提示词 / 请求**
+
+```text
+给代码编写 agent：
+
+1. 真实 C/S 自动化测试证据不足。当前测试直接调用 OtaService，没有启动真实 HTTP server，也没有通过 CLI 调用。
+2. SHA256 mismatch 没有独立失败用例。当前只覆盖 bad MD5。
+3. data/state.json 是运行态目录风险。data/ 已被 .gitignore 排除，但提交/演示前要确认不会污染初始状态。
+
+请根据这些意见补测试和必要文档，不改变项目边界：
+- client 仍然只能通过 HTTP 调 server；
+- server 仍然拥有状态、staging、checksum、slot write、reboot、rollback；
+- 不引入数据库、Docker、认证或复杂前端。
+```
 
 **AI 产出**
 
+- 测试：新增 `tests/test_http_api.py`。
+- 测试：扩展 `tests/test_ota_flow.py`，新增 SHA256 mismatch 独立失败用例。
+- 固件：新增 `firmware_repo/firmware_bad_sha256.bin`。
+- 固件 metadata：新增 `firmware_repo/firmware_bad_sha256.bin.json`。
+- 文档：更新 `README.md`、`TODO.md`、`AI_LOG.md`。
+- 验证：补充真实 HTTP server + CLI subprocess 测试，补充 client 边界静态测试。
 
+**人工判断和修改**
 
+- 接受 C/S 自动化证据不足的问题，并要求用真实 HTTP server + CLI subprocess 覆盖。
+- 接受 SHA256 独立测试不足的问题，并要求新增 bad SHA256 fixture。
+- 接受 client/server 边界需要自动化证据，但要求静态检查避免误判 HTTP `urlopen()` 为文件 `open()`。
+- 对 `data/` 风险采用交付控制：`data/` 继续由 `.gitignore` 排除，提交前确认工作区不包含运行态 state。
+- 不改变 server 初始化策略，不引入额外基础设施。
 
 **验证方式**
 
+```bash
+python3 -m unittest discover -s tests -v
+rg -n "OtaService|state\.json|firmware_repo|staging|copyfile|shutil|Path\(" ota_ab_sim/client.py
+find data -maxdepth 3 -type f -print
+git status --short --ignored
+```
+
+验证结果：
+- 7 个测试全部通过：
+
+```text
+Ran 7 tests in 0.734s
+OK
+```
+
+- `tests/test_http_api.py` 覆盖真实 HTTP server + CLI subprocess 路径，并断言持久化 `state.json` 变为 `active_slot: A`。
+- `tests/test_http_api.py` 静态检查 `client.py` 不包含 `OtaService`、`state.json`、`firmware_repo`、`staging`、`copyfile`、`shutil`、`Path(` 等 server-state 访问痕迹。
+- `tests/test_ota_flow.py` 覆盖 SHA256 mismatch，断言 `ota_state: verification_failed`，且 slot A 不写入。
+- `find data -maxdepth 3 -type f -print` 当前返回 `data` 不存在。
+- `git status --short --ignored` 当前只显示 ignored `__pycache__/`，不显示 `data/`。
+
+### TURN-7 嵌入式 OTA 语义增强
+
+**工作内容**
+
+- 增强最小模拟器的嵌入式 OTA A/B 工程语义。
+- 增加真实 slot 文件写入、OTA event log、boot failure 语义字段和 firmware repo index。
+- 更新 README，明确 Python 项目模拟 OTA 控制面和状态机，不是 bootloader 或 flash driver。
+- 主 coder 完成改动后反馈：已补完，未提交。
+
+**给 AI 的提示词 / 请求**
+
+```text
+1. 补真实 slot 文件写入
+      - 当前写 A 主要是更新 metadata。
+      - 请新增类似：
+          - data/slots/A/firmware.bin
+          - data/slots/B/firmware.bin
+      - upgrade 校验通过后，把 staged firmware copy 到 data/slots/A/
+        firmware.bin。
+      - state 里记录：
+          - slot file path
+          - size
+          - md5
+          - sha256
+      - 测试要求：
+          - checksum failure 后，A slot 文件不存在或未改变。
+          - successful upgrade 后，A slot 文件存在且 checksum 匹配。
+  2. 补 OTA event log / steps
+      - 当前 POST /upgrade 一次完成 stage、verify、write A，流程感偏弱。
+      - 不一定要拆 API，但 status/response 里要能看到步骤，例如：
+          - staged
+          - verified
+          - written_to_A
+          - pending_reboot
+          - boot_confirmed
+          - rolled_back
+      - 建议字段：events 或 last_steps。
+      - 测试要求：
+          - successful upgrade 包含 staged/verified/written_to_A。
+          - boot failure 包含 reboot_started/boot_failed/rolled_back。
+  3. 补 README 说明 Python 定位
+      - 加一段明确说明：
+
+     This project simulates the OTA control plane and A/B state machine.
+     It does not implement a real bootloader or flash driver.
+     A/B slots, firmware staging, checksum verification, boot result,
+     and rollback are simulated with filesystem files and persistent
+  JSON state.
+      - 中文意思：这是 OTA 控制面和状态机模拟，不是设备端固件实现。
+
+  建议处理
+
+  4. 补 firmware_repo/index.json
+      - 让 firmware repo 更像 OTA 仓库。
+      - 示例字段：
+          - version
+```
+
+**AI 产出**
+
+- 代码：更新 `ota_ab_sim/ota.py`，把校验通过的 staged firmware 复制到 `data/slots/A/firmware.bin`，并记录 file path、size、md5、sha256。
+- 代码：checksum 失败不会写 A slot 文件。
+- 状态：state/response 增加 `events`，成功 upgrade 包含 `staged`、`verified`、`written_to_A`、`pending_reboot`；boot fail 包含 `reboot_started`、`boot_failed`、`rolled_back`。
+- 状态：增加 `boot_attempts`、`max_boot_attempts`、`rollback_reason`、`boot_failed_at_reboot`。
+- 测试：扩展 `tests/test_ota_flow.py` 和 `tests/test_http_api.py`，覆盖 slot 文件、events、boot rollback 语义、firmware index。
+- 文档：更新 `README.md`，说明这是 OTA control plane / A/B state machine 模拟，不是 bootloader 或 flash driver。
+- 数据：新增 `firmware_repo/index.json`。
+
+**人工判断和修改**
+
+- 保持单一 `POST /upgrade` API，不拆 stage/verify/write 三个 API；用 `events` 字段展示流程步骤。
+- 保持标准库 Python 和文件系统模拟，不引入数据库、Docker、认证或前端框架。
+
+**验证方式**
+
+```bash
+python3 -m unittest discover -s tests -v
+git status --short --ignored
+```
 
 验证结果：
 
+- 8 个测试全部通过：
+
+```text
+Ran 8 tests in 1.374s
+OK
+```
+
+- 主 coder 报告 `git status --short --ignored` 当前显示：
+
+```text
+ M AI_LOG.md
+ M README.md
+ M ota_ab_sim/ota.py
+ M tests/test_http_api.py
+ M tests/test_ota_flow.py
+?? firmware_repo/index.json
+!! ota_ab_sim/__pycache__/
+!! tests/__pycache__/
+```
+
+- 没有 `data/` 进入 git；只有 `__pycache__/` 被 ignored。
+- `find data -maxdepth 3 -type f -print` 返回 `data` 不存在。
+- 本轮改动未提交。
