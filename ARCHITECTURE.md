@@ -4,272 +4,242 @@
 
 ## Overview
 
-This project is a small Python simulation of an OTA control plane and A/B state machine.
+This is a Python simulation of an OTA control plane and A/B state machine. It does not implement a real bootloader, flash driver, or device firmware updater.
 
-It does not implement a real bootloader, flash driver, or device firmware update agent. The embedded concepts are represented with filesystem files and persistent JSON state:
+The simulation uses filesystem files and persistent JSON state:
 
-- Firmware repository: `firmware_repo/`
-- Staging area: `data/staging/`
+- Firmware repository: `firmware/<package_id>/`
+- Staging area: `data/staging/<package_id>/`
 - Simulated slots: `data/slots/A/firmware.bin` and `data/slots/B/firmware.bin`
-- Persistent state: `data/state.json`
+- State: `data/state.json`
 
-The initial active slot is `B`; the initial upgrade target slot is `A`.
+Initial state:
+
+- `active_slot`: `B`
+- inactive install target: `A`
+- `pending_slot`: `null`
+
+## Firmware Package Model
+
+Package layout:
+
+```text
+firmware/
+  v2_success/
+    manifest.json
+    firmware.bin
+```
+
+Manifest shape:
+
+```json
+{
+  "package_id": "v2_success",
+  "version": "2.0.0",
+  "compatible_model": "demo-board",
+  "slot_class": "rootfs",
+  "payload": {
+    "filename": "firmware.bin",
+    "size": 19,
+    "md5": "...",
+    "sha256": "..."
+  }
+}
+```
+
+Validation rules:
+
+- Client sends only a package id, for example `v2_success`.
+- Server rejects package ids containing path separators, absolute path syntax, or `..`.
+- `manifest.package_id` must match the directory name.
+- `payload.filename` must be `firmware.bin`.
+- `compatible_model` must match `device_model`.
+- `slot_class` must be `rootfs`.
+- MD5, SHA256, and size are verified from the staged payload, not from the repository source.
 
 ## Client/Server Boundary
 
-### Server Responsibilities
+The server owns:
 
-The server owns all OTA behavior:
-
-- HTTP API endpoints.
-- Persistent state initialization and mutation.
-- Firmware repository index validation.
-- Local firmware staging from `firmware_repo/` to `data/staging/`.
-- MD5 and SHA256 calculation from actual file contents.
-- Slot file writes under `data/slots/`.
-- Pending boot state.
+- Package discovery under `firmware/`.
+- Package directory staging.
+- Manifest loading.
+- Checksum verification.
+- Inactive slot selection.
+- Slot file writes.
 - Boot success/failure simulation.
-- Rollback state.
-- OTA event log.
+- Rollback and persistent state.
 
-### Client Responsibilities
+The client only:
 
-The CLI client only:
+- Parses commands.
+- Calls HTTP APIs.
+- Prints JSON.
 
-- Parses user commands.
-- Sends HTTP requests to the server.
-- Prints JSON responses.
-
-The client must not import `OtaService`, read/write `data/state.json`, copy firmware, inspect `firmware_repo/`, or mutate slot files directly.
-
-## Current File Layout
-
-```text
-ota_ab_sim/
-  __init__.py
-  client.py
-  ota.py
-  server.py
-tests/
-  test_http_api.py
-  test_ota_flow.py
-firmware_repo/
-  index.json
-  firmware_v2.bin
-  firmware_v2.bin.json
-  firmware_bad_checksum.bin
-  firmware_bad_checksum.bin.json
-  firmware_bad_sha256.bin
-  firmware_bad_sha256.bin.json
-data/                 # runtime only, ignored by git
-  state.json
-  staging/
-  slots/
-    A/firmware.bin
-    B/firmware.bin
-```
+The client must not read package files, staging files, slot files, or `data/state.json`.
 
 ## HTTP API
 
-### `GET /status`
-
-Returns the complete OTA state, including derived fields.
-
-Important response fields:
-
-- `active_slot`
-- `current_version`
-- `active_version`
-- `slot_versions`
-- `target_slot`
-- `pending_upgrade`
-- `ota_state`
-- `events`
-- `slots`
-- `staged_firmware`
-- `boot_attempts`
-- `max_boot_attempts`
-- `rollback_reason`
-- `boot_failed_at_reboot`
-- `last_error`
-
-### `GET /firmware`
-
-Returns the server-side firmware repository index.
-
-The server reads `firmware_repo/index.json`; the client does not inspect the folder directly.
-
-Index entry shape:
-
-```json
-{
-  "version": "2.0.0",
-  "filename": "firmware_v2.bin",
-  "size": 19,
-  "md5": "...",
-  "sha256": "...",
-  "target_slot": "A",
-  "compatible_model": "demo-board"
-}
+```text
+GET  /status
+GET  /firmware
+POST /stage    {"package": "v2_success"}
+POST /verify   {}
+POST /install  {}
+POST /upgrade  {"package": "v2_success"}
+POST /reboot   {"simulate_boot_failure": true}
+POST /reset    {}
 ```
 
-### `POST /upgrade`
-
-Stages, verifies, and writes firmware to the current target slot.
-
-Request:
-
-```json
-{
-  "firmware": "firmware_v2.bin"
-}
-```
-
-Server-side behavior:
-
-1. Check that the firmware filename is listed in `firmware_repo/index.json`.
-2. Check that the firmware file and metadata file exist under `firmware_repo/`.
-3. Copy the firmware to `data/staging/<filename>`.
-4. Calculate actual MD5 and SHA256 from the staged file.
-5. Compare actual hashes with metadata.
-6. If either hash fails, set `ota_state` to `verification_failed` and do not write the target slot.
-7. If both hashes pass, copy staged firmware to `data/slots/<target_slot>/firmware.bin`.
-8. Record slot file path, size, MD5, SHA256, version, firmware name, and pending boot status.
-9. Set `pending_upgrade` to the target slot and `ota_state` to `pending_reboot`.
-
-Successful upgrade events:
+`POST /upgrade` is kept for demo speed. Internally it runs:
 
 ```text
-staged
-verified
-written_to_A
-pending_reboot
+stage -> verify -> install
 ```
 
-If the current target slot is `B`, the write event is `written_to_B`.
+## State Model
 
-### `POST /reboot`
+State is stored in `data/state.json`.
 
-Simulates rebooting into the pending slot.
-
-Request:
+Important fields:
 
 ```json
 {
-  "simulate_boot_failure": false
-}
-```
-
-Success behavior:
-
-- Increment `boot_attempts`.
-- Record `reboot_started`.
-- Mark pending slot as `confirmed`.
-- Set `active_slot` to the pending slot.
-- Set `rollback_slot` to the previous active slot.
-- Set `target_slot` to the previous active slot, enabling the next upgrade to use the inactive slot.
-- Clear `pending_upgrade`.
-- Set `ota_state` to `boot_confirmed`.
-- Record `boot_confirmed`.
-
-Failure behavior:
-
-- Increment `boot_attempts`.
-- Record `reboot_started`.
-- Mark pending slot as `failed`.
-- Keep or restore `active_slot` to `rollback_slot`.
-- Clear `pending_upgrade`.
-- Set `ota_state` to `rolled_back`.
-- Set `rollback_reason` to `boot_failed`.
-- Set `boot_failed_at_reboot` to `true`.
-- Record `boot_failed` and `rolled_back`.
-
-### `POST /reset`
-
-Restores a deterministic initial state for demos and tests.
-
-Reset behavior:
-
-- Clears runtime staging and slot directories.
-- Recreates `data/slots/B/firmware.bin` as the factory firmware.
-- Leaves `data/slots/A/firmware.bin` absent until a successful upgrade writes it.
-- Sets active slot to `B`.
-- Sets target slot to `A`.
-- Clears pending upgrade and rollback error state.
-
-## Persistent State Model
-
-Example state:
-
-```json
-{
+  "device_model": "demo-board",
   "active_slot": "B",
-  "current_version": "1.0.0",
   "target_slot": "A",
-  "rollback_slot": "B",
+  "pending_slot": null,
   "pending_upgrade": null,
+  "rollback_slot": null,
   "ota_state": "idle",
+  "last_error": null,
   "events": ["reset"],
-  "boot_attempts": 0,
-  "max_boot_attempts": 1,
-  "rollback_reason": null,
-  "boot_failed_at_reboot": false,
+  "bootloader": {
+    "upgrade_available": false,
+    "boot_once_slot": null,
+    "boot_count": 0,
+    "boot_limit": 1
+  },
   "slots": {
     "A": {
       "version": null,
-      "firmware_name": null,
+      "status": "empty",
       "file_path": "data/slots/A/firmware.bin",
       "size": null,
-      "checksum_md5": null,
-      "checksum_sha256": null,
-      "boot_status": "empty"
+      "md5": null,
+      "sha256": null
     },
     "B": {
       "version": "1.0.0",
-      "firmware_name": "factory_v1.bin",
+      "status": "good",
       "file_path": "data/slots/B/firmware.bin",
       "size": 20,
-      "checksum_md5": "...",
-      "checksum_sha256": "...",
-      "boot_status": "confirmed"
+      "md5": "...",
+      "sha256": "..."
     }
   },
-  "staged_firmware": null,
-  "last_error": null
+  "staged_package": null
 }
 ```
 
-## State Machine
+Compatibility aliases are retained for older demo checks:
+
+- `pending_upgrade` mirrors `pending_slot`.
+- slot `boot_status` mirrors slot `status`.
+- slot `checksum_md5` and `checksum_sha256` mirror `md5` and `sha256`.
+- `staged_firmware` mirrors `staged_package`.
+
+## State Transitions
+
+### Reset
+
+- Clears `data/staging/` and `data/slots/`.
+- Recreates slot `B` factory firmware.
+- Leaves slot `A` empty.
+- Sets `ota_state` to `idle`.
+
+### Stage
 
 ```text
-idle
-  -> staged
-  -> verification_failed
-
-idle
-  -> staged
-  -> verified
-  -> written_to_<target_slot>
-  -> pending_reboot
-  -> boot_confirmed
-
-pending_reboot
-  -> reboot_started
-  -> boot_failed
-  -> rolled_back
+idle -> staged
 ```
 
-The event log records intermediate steps even though `POST /upgrade` remains a single API call.
+Server behavior:
 
-## Control-Flow Invariants
+- Validates package id.
+- Copies the whole package directory to `data/staging/<package_id>/`.
+- Reads staged `manifest.json`.
+- Records `staged_package`.
+- Appends `package_staged` and `manifest_loaded`.
+- Does not write any slot file.
 
-- Firmware must be listed in `firmware_repo/index.json` before upgrade.
-- MD5 and SHA256 are calculated from actual staged file contents.
-- Slot file writes happen only after both hashes pass.
-- Checksum failure must leave the target slot file absent or unchanged.
-- Writing a slot does not immediately change `active_slot`.
-- Boot failure is simulated during `POST /reboot`, after the target slot has been written and marked pending.
-- Rollback clears `pending_upgrade` and persists `active_slot` as the rollback slot.
-- After a successful boot into `A`, the next `target_slot` becomes `B`.
+### Verify
+
+```text
+staged -> verified
+staged -> verification_failed
+```
+
+Server behavior:
+
+- Reads staged manifest and staged `firmware.bin`.
+- Calculates size, MD5, and SHA256 from staged payload.
+- On mismatch, records `verification_failed` and leaves inactive slot absent or unchanged.
+- On success, sets `staged_package.verified` to `true`.
+
+### Install
+
+```text
+verified -> pending_reboot
+```
+
+Server behavior:
+
+- Selects the inactive slot automatically.
+- Copies staged `firmware.bin` to `data/slots/<inactive_slot>/firmware.bin`.
+- Records slot path, size, MD5, SHA256, version, and package id.
+- Sets slot `status` to `pending`.
+- Sets `pending_slot` and `pending_upgrade`.
+- Sets `rollback_slot` to the current active slot.
+- Sets bootloader `upgrade_available` and `boot_once_slot`.
+- Appends `written_to_A` or `written_to_B`, then `pending_reboot`.
+
+### Reboot Success
+
+```text
+pending_reboot -> boot_confirmed
+```
+
+- `active_slot` becomes `pending_slot`.
+- New active slot status becomes `good`.
+- Previous slot remains `good`.
+- `pending_slot` and `pending_upgrade` become `null`.
+- `rollback_slot` remains the previous good slot for observability.
+- `target_slot` becomes the inactive slot for the next upgrade.
+- Bootloader upgrade flags are cleared.
+- Events include `reboot_started` and `boot_confirmed`.
+
+### Reboot Failure
+
+```text
+pending_reboot -> rolled_back
+```
+
+- Active slot becomes `rollback_slot`.
+- Failed slot status becomes `failed`.
+- Previous slot remains `good`.
+- `pending_slot` and `pending_upgrade` become `null`.
+- Bootloader upgrade flags are cleared.
+- `bootloader.boot_count` increments.
+- `rollback_reason` is `boot_failed`.
+- Events include `reboot_started`, `boot_failed`, and `rolled_back`.
+
+## Invariants
+
+- The client cannot bypass the server state machine.
+- Verification reads only staged files.
+- Slot writes happen only after verification succeeds.
+- Install writes only the inactive slot.
+- Checksum failure prevents slot file writes.
+- Reboot failure persists rollback state.
 - `data/` is runtime state and must not be committed.
-

@@ -33,8 +33,14 @@ def main(argv=None):
     subparsers.add_parser("firmware")
     subparsers.add_parser("reset")
 
+    stage_parser = subparsers.add_parser("stage")
+    stage_parser.add_argument("package")
+
+    subparsers.add_parser("verify")
+    subparsers.add_parser("install")
+
     upgrade_parser = subparsers.add_parser("upgrade")
-    upgrade_parser.add_argument("firmware")
+    upgrade_parser.add_argument("package")
 
     reboot_parser = subparsers.add_parser("reboot")
     boot_group = reboot_parser.add_mutually_exclusive_group(required=True)
@@ -49,8 +55,14 @@ def main(argv=None):
         status, payload = request_json(args.server, "GET", "/firmware")
     elif args.command == "reset":
         status, payload = request_json(args.server, "POST", "/reset", {})
+    elif args.command == "stage":
+        status, payload = request_json(args.server, "POST", "/stage", {"package": args.package})
+    elif args.command == "verify":
+        status, payload = request_json(args.server, "POST", "/verify", {})
+    elif args.command == "install":
+        status, payload = request_json(args.server, "POST", "/install", {})
     elif args.command == "upgrade":
-        status, payload = request_json(args.server, "POST", "/upgrade", {"firmware": args.firmware})
+        status, payload = request_json(args.server, "POST", "/upgrade", {"package": args.package})
     elif args.command == "reboot":
         status, payload = request_json(
             args.server,
@@ -67,4 +79,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-

@@ -16,33 +16,23 @@ from ota_ab_sim.server import make_handler
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def write_firmware(repo: Path, name: str, version: str, content: bytes):
-    firmware_path = repo / name
-    firmware_path.write_bytes(content)
-    metadata = {
-        "name": name,
+def write_package(repo: Path, package_id: str, version: str, content: bytes):
+    package_dir = repo / package_id
+    package_dir.mkdir()
+    (package_dir / "firmware.bin").write_bytes(content)
+    manifest = {
+        "package_id": package_id,
         "version": version,
-        "md5": hashlib.md5(content).hexdigest(),
-        "sha256": hashlib.sha256(content).hexdigest(),
+        "compatible_model": "demo-board",
+        "slot_class": "rootfs",
+        "payload": {
+            "filename": "firmware.bin",
+            "size": len(content),
+            "md5": hashlib.md5(content).hexdigest(),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        },
     }
-    (repo / f"{name}.json").write_text(json.dumps(metadata), encoding="utf-8")
-
-
-def write_index(repo: Path):
-    index = {
-        "firmware": [
-            {
-                "version": "2.0.0",
-                "filename": "firmware_v2.bin",
-                "size": len(b"firmware version 2\n"),
-                "md5": hashlib.md5(b"firmware version 2\n").hexdigest(),
-                "sha256": hashlib.sha256(b"firmware version 2\n").hexdigest(),
-                "target_slot": "A",
-                "compatible_model": "demo-board",
-            }
-        ]
-    }
-    (repo / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    (package_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def parse_json(stdout):
@@ -53,10 +43,9 @@ class HttpClientServerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base_dir = Path(self.tmp.name)
-        self.repo = self.base_dir / "firmware_repo"
+        self.repo = self.base_dir / "firmware"
         self.repo.mkdir()
-        write_firmware(self.repo, "firmware_v2.bin", "2.0.0", b"firmware version 2\n")
-        write_index(self.repo)
+        write_package(self.repo, "v2_success", "2.0.0", b"firmware version 2\n")
 
         service = OtaService(self.base_dir)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
@@ -91,7 +80,17 @@ class HttpClientServerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
         return parse_json(result.stdout)
 
-    def test_cli_talks_to_real_http_server_for_upgrade_and_reboot(self):
+    def test_firmware_command_lists_package_manifest_fields(self):
+        response = self.run_client("firmware")
+
+        self.assertEqual(response["firmware"][0]["package_id"], "v2_success")
+        self.assertEqual(response["firmware"][0]["version"], "2.0.0")
+        self.assertEqual(response["firmware"][0]["compatible_model"], "demo-board")
+        self.assertEqual(response["firmware"][0]["slot_class"], "rootfs")
+        self.assertEqual(response["firmware"][0]["payload"]["filename"], "firmware.bin")
+        self.assertEqual(response["firmware"][0]["payload"]["size"], len(b"firmware version 2\n"))
+
+    def test_cli_one_shot_upgrade_talks_to_real_http_server(self):
         reset = self.run_client("reset")
         self.assertEqual(reset["state"]["active_slot"], "B")
 
@@ -99,10 +98,10 @@ class HttpClientServerTests(unittest.TestCase):
         self.assertEqual(status["active_slot"], "B")
         self.assertEqual(status["current_version"], "1.0.0")
 
-        upgrade = self.run_client("upgrade", "firmware_v2.bin")
+        upgrade = self.run_client("upgrade", "v2_success")
         self.assertEqual(upgrade["state"]["active_slot"], "B")
-        self.assertEqual(upgrade["state"]["pending_upgrade"], "A")
-        self.assertEqual(upgrade["state"]["slots"]["A"]["boot_status"], "pending")
+        self.assertEqual(upgrade["state"]["pending_slot"], "A")
+        self.assertEqual(upgrade["state"]["slots"]["A"]["status"], "pending")
 
         reboot = self.run_client("reboot", "--boot-ok")
         self.assertEqual(reboot["state"]["active_slot"], "A")
@@ -111,12 +110,25 @@ class HttpClientServerTests(unittest.TestCase):
         persisted = json.loads((self.base_dir / "data" / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(persisted["active_slot"], "A")
 
-    def test_firmware_command_lists_repository_index_fields(self):
-        response = self.run_client("firmware")
+    def test_cli_step_by_step_stage_verify_install_reboot(self):
+        self.run_client("reset")
+        stage = self.run_client("stage", "v2_success")
+        self.assertEqual(stage["state"]["ota_state"], "staged")
+        self.assertTrue((self.base_dir / "data" / "staging" / "v2_success" / "manifest.json").exists())
+        self.assertTrue((self.base_dir / "data" / "staging" / "v2_success" / "firmware.bin").exists())
 
-        self.assertEqual(response["firmware"][0]["filename"], "firmware_v2.bin")
-        self.assertEqual(response["firmware"][0]["target_slot"], "A")
-        self.assertEqual(response["firmware"][0]["compatible_model"], "demo-board")
+        verify = self.run_client("verify")
+        self.assertEqual(verify["state"]["ota_state"], "verified")
+        self.assertTrue(verify["state"]["staged_package"]["verified"])
+
+        install = self.run_client("install")
+        self.assertEqual(install["state"]["ota_state"], "pending_reboot")
+        self.assertEqual(install["state"]["pending_slot"], "A")
+        self.assertTrue((self.base_dir / "data" / "slots" / "A" / "firmware.bin").exists())
+
+        reboot = self.run_client("reboot", "--boot-ok")
+        self.assertEqual(reboot["state"]["active_slot"], "A")
+        self.assertEqual(reboot["state"]["slots"]["A"]["status"], "good")
 
 
 class ClientSeparationTests(unittest.TestCase):
@@ -128,8 +140,10 @@ class ClientSeparationTests(unittest.TestCase):
         forbidden_text = [
             "OtaService",
             "state.json",
-            "firmware_repo",
-            "staging",
+            "firmware/",
+            "data/staging",
+            "data/slots",
+            "copytree",
             "copyfile",
             "shutil",
         ]

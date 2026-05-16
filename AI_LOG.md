@@ -611,6 +611,63 @@ git status --short --ignored
 - `data/` 没有进入 git 状态。
 - 只有 Python 缓存目录被 `.gitignore` 忽略。
 
+### TURN-9 Package Directory OTA Refactor
+
+**工作内容**
+
+- 按 `ENGINEERING_ROADMAP.md` 做下一轮实现，控制范围为 package-directory OTA pipeline。
+- 将固件输入从 flat firmware 文件迁移为 `firmware/<package_id>/manifest.json + firmware.bin`。
+- 增加 step-by-step API/CLI：`stage`、`verify`、`install`。
+- 保留 `POST /upgrade` 一键流程，内部执行 `stage -> verify -> install`。
+
+**给 AI 的提示词 / 请求**
+
+```text
+按 ENGINEERING_ROADMAP.md 做下一轮实现，但控制范围：
+1. firmware/<package_id>/manifest.json + firmware.bin 包目录结构。
+2. staging 复制整个 package directory 到 data/staging/<package_id>/。
+3. 校验必须读取 staged manifest 和 staged firmware.bin。
+4. install/write 只写 inactive slot，写到 data/slots/<slot>/firmware.bin。
+5. state 增加 pending_slot、slot status、staged_package；保留 pending_upgrade 兼容旧测试。
+6. 保留 POST /upgrade 一键流程，内部按 stage -> read manifest -> verify -> write inactive slot -> pending boot 走。
+7. 补 path traversal 测试，防止 package id 传 ../。
+8. 更新 README、ARCHITECTURE、SPEC、demo_script、TODO、AI_LOG。
+```
+
+**AI 产出**
+
+- 代码：更新 `ota_ab_sim/ota.py`，实现 package staging、staged manifest verification、inactive slot install、pending boot、rollback。
+- API：更新 `ota_ab_sim/server.py`，新增 `/stage`、`/verify`、`/install`。
+- CLI：更新 `ota_ab_sim/client.py`，新增 `stage`、`verify`、`install`。
+- 固件：新增 `firmware/v2_success`、`firmware/v3_success`、`firmware/v2_bad_md5`、`firmware/v2_bad_sha256` 包目录。
+- 清理：删除旧 `firmware_repo/` 平铺固件文件，避免两套仓库模型并存。
+- 测试：重写 `tests/test_ota_flow.py` 和 `tests/test_http_api.py` 覆盖 package flow、path traversal、step-by-step CLI、one-shot CLI。
+- 文档：更新 README、ARCHITECTURE、SPEC、demo_script、TODO、AI_LOG。
+
+**人工判断和修改**
+
+- 保持 Python 标准库实现。
+- 不引入 Docker、数据库、认证、前端框架或真实 bootloader。
+- 保留旧字段兼容：`pending_upgrade`、`staged_firmware`、slot `boot_status`、slot checksum aliases。
+
+**验证方式**
+
+```bash
+python3 -m unittest discover -s tests -v
+git status --short --ignored
+```
+
+验证结果：
+
+- 13 个测试全部通过：
+
+```text
+Ran 13 tests in 2.291s
+OK
+```
+
+- `git status --short --ignored` 显示本轮源码、文档、测试、`firmware/` 包目录新增和旧 `firmware_repo/` 文件删除；`data/` 不存在且未进入 git。
+
 ### TURN-9 Reviewer Roadmap 文档审查与记录
 
 **工作内容**

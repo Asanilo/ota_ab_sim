@@ -1,0 +1,12 @@
+{
+  "package_id": "v2_bad_md5",
+  "version": "9.9.9",
+  "compatible_model": "demo-board",
+  "slot_class": "rootfs",
+  "payload": {
+    "filename": "firmware.bin",
+    "size": 19,
+    "md5": "bad-md5",
+    "sha256": "337d8f4d292c0598cf0851862255ab3101247c71f95dd0251ebf231d967ef494"
+  }
+}

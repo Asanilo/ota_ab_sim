@@ -1,0 +1,12 @@
+{
+  "package_id": "v2_bad_sha256",
+  "version": "9.9.8",
+  "compatible_model": "demo-board",
+  "slot_class": "rootfs",
+  "payload": {
+    "filename": "firmware.bin",
+    "size": 26,
+    "md5": "ee8e9d12aea45bb9066b6cf7e799907e",
+    "sha256": "bad-sha256"
+  }
+}

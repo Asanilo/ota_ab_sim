@@ -22,11 +22,24 @@ def make_handler(service):
             path = urlparse(self.path).path
             body = self._read_body()
             if path in ("/upgrade", "/api/upgrade"):
-                name = body.get("firmware") or body.get("name")
-                if not name:
-                    self._send(400, {"ok": False, "error": "firmware is required"})
+                package_id = body.get("package") or body.get("firmware") or body.get("name")
+                if not package_id:
+                    self._send(400, {"ok": False, "error": "package is required"})
                     return
-                result = service.upgrade(name)
+                result = service.upgrade(package_id)
+                self._send(200 if result["ok"] else 400, result)
+            elif path in ("/stage", "/api/stage"):
+                package_id = body.get("package") or body.get("firmware") or body.get("name")
+                if not package_id:
+                    self._send(400, {"ok": False, "error": "package is required"})
+                    return
+                result = service.stage(package_id)
+                self._send(200 if result["ok"] else 400, result)
+            elif path in ("/verify", "/api/verify"):
+                result = service.verify()
+                self._send(200 if result["ok"] else 400, result)
+            elif path in ("/install", "/api/install"):
+                result = service.install()
                 self._send(200 if result["ok"] else 400, result)
             elif path in ("/reboot", "/api/reboot"):
                 result = service.reboot(bool(body.get("simulate_boot_failure", False)))
@@ -72,4 +85,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

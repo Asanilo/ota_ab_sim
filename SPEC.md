@@ -4,195 +4,202 @@
 
 ## Product Scope
 
-This project is a 24-hour assignment implementation of an OTA A/B partition upgrade simulator.
+This project is a CLI plus HTTP server simulation of an OTA A/B partition upgrade flow.
 
-It will provide:
+It provides:
 
 - A real HTTP server process.
 - A CLI client that talks to the server only through HTTP.
-- A local dummy firmware repository.
-- Persistent server-owned OTA state.
-- A demo flow proving upgrade success and rollback behavior.
+- Local package-based dummy firmware under `firmware/<package_id>/`.
+- Server-owned staging under `data/staging/<package_id>/`.
+- Simulated slot files under `data/slots/<slot>/firmware.bin`.
+- Persistent JSON OTA state.
 
-It will not provide:
+It does not provide:
 
-- Real network firmware download.
+- Real bootloader integration.
 - Real flash partition writes.
-- Authentication.
-- Database storage.
-- Docker packaging.
-- Frontend framework.
+- Real network download.
+- Authentication, database, Docker, or frontend framework.
 
-## Core Acceptance Criteria
+## Acceptance Criteria
 
-### AC1: Current Version Is Queryable
+### AC1: Current State And Version Are Queryable
 
-The user can check current OTA state and version through the client.
+Command:
+
+```bash
+python3 -m ota_ab_sim.client status
+```
 
 Expected observable fields:
 
+- `device_model`
 - `active_slot`
-- `active_version`
 - `current_version`
 - `slot_versions`
+- `target_slot`
+- `pending_slot`
 - `pending_upgrade`
-- `last_error`
-- `slots.A.version`
-- `slots.B.version`
+- `staged_package`
+- `slots.A.status`
+- `slots.B.status`
 - `ota_state`
+- `last_error`
 
 Initial expected state:
 
 - `active_slot` is `B`
-- target upgrade slot is `A`
+- `current_version` is `1.0.0`
+- `target_slot` is `A`
+- `pending_slot` is `null`
+- slot `B.status` is `good`
+- slot `A.status` is `empty`
 
-Example verification command:
+### AC2: Firmware Uses Package Directory Layout
 
-```bash
-python3 -m ota_ab_sim.client status
+Firmware packages live under:
+
+```text
+firmware/<package_id>/
+  manifest.json
+  firmware.bin
 ```
 
-### AC2: Firmware Is Staged From Local Dummy Firmware Folder
+The manifest includes:
 
-The server stages firmware by copying a firmware file from a local server-side folder such as `firmware_repo/` into a server-owned staging folder such as `data/staging/`.
+- `package_id`
+- `version`
+- `compatible_model`
+- `slot_class`
+- `payload.filename`
+- `payload.size`
+- `payload.md5`
+- `payload.sha256`
 
-The client may request a firmware name through HTTP, but must not copy files directly. In the minimal implementation, staging is performed inside `POST /upgrade`.
-
-Example verification command:
+Command:
 
 ```bash
-python3 -m ota_ab_sim.client upgrade firmware_v2.bin
+python3 -m ota_ab_sim.client firmware
 ```
 
 Expected result:
 
-- Server response shows staged firmware metadata.
-- Persistent state records `staged_firmware`.
-- The staged file exists in the server-owned staging area.
+- Server lists package ids and manifest metadata.
+- Client does not read `firmware/` directly.
 
-### AC3: MD5 And SHA256 Are Verified
+### AC3: Staging Copies The Whole Package Directory
 
-The server verifies both MD5 and SHA256 during `POST /upgrade` before allowing a slot write.
+Command:
+
+```bash
+python3 -m ota_ab_sim.client stage v2_success
+```
+
+Expected result:
+
+- Server creates `data/staging/v2_success/manifest.json`.
+- Server creates `data/staging/v2_success/firmware.bin`.
+- State records `staged_package`.
+- Events include `package_staged` and `manifest_loaded`.
+- No slot is written during stage.
+
+Security requirement:
+
+- Package ids containing `..`, `/`, `\`, or absolute path syntax are rejected.
+
+### AC4: Verification Reads Staged Manifest And Staged Firmware
+
+Command:
+
+```bash
+python3 -m ota_ab_sim.client verify
+```
 
 Expected behavior:
 
-- If MD5 mismatches, verification fails.
-- If SHA256 mismatches, verification fails.
-- If either checksum fails, the server must reject the upgrade and prevent writing to slot A.
-- Checksum failure must affect control flow, not only print a warning.
+- Server reads `data/staging/<package_id>/manifest.json`.
+- Server hashes `data/staging/<package_id>/firmware.bin`.
+- MD5, SHA256, and size must match the manifest payload.
+- On success, `staged_package.verified` is `true`.
+- On failure, `ota_state` is `verification_failed` and inactive slot file is absent or unchanged.
 
-Example failure verification command:
+### AC5: Install Writes Only The Inactive Slot
+
+Command:
 
 ```bash
-python3 -m ota_ab_sim.client upgrade firmware_bad_checksum.bin
+python3 -m ota_ab_sim.client install
 ```
-
-Expected status field after success:
-
-- `ota_state` is `pending_reboot`
-- `staged_firmware.verified` is `true`
-
-Expected status field after failure:
-
-- `ota_state` is `verification_failed`
-- `staged_firmware.verified` is `false`
-- slot A remains unchanged
-
-### AC4: Verified Firmware Can Be Written To Slot A
-
-The server writes only verified staged firmware to target slot `A` as part of `POST /upgrade`.
 
 Expected behavior:
 
-- Slot A is not written unless both checksums match.
-- Successful write updates slot A metadata.
-- Slot A is marked `pending`.
-- Active slot remains `B` until reboot succeeds.
+- If active slot is `B`, install writes `data/slots/A/firmware.bin`.
+- If active slot is `A`, install writes `data/slots/B/firmware.bin`.
+- Slot metadata records file path, size, MD5, SHA256, version, package id, and `status: pending`.
+- State sets `pending_slot` and compatibility alias `pending_upgrade`.
+- Bootloader fields set `upgrade_available: true` and `boot_once_slot`.
 
-Example verification command:
+### AC6: One-Shot Upgrade Is Preserved
+
+Command:
 
 ```bash
-python3 -m ota_ab_sim.client upgrade firmware_v2.bin
-python3 -m ota_ab_sim.client status
+python3 -m ota_ab_sim.client upgrade v2_success
 ```
 
-Expected status fields:
+Expected behavior:
 
-- `active_slot` is still `B`
-- `target_slot` is `A`
-- `pending_upgrade` is `A`
-- `slots.A.boot_status` is `pending`
-- `ota_state` is `pending_reboot`
+- Internally runs stage, verify, and install.
+- Response includes events proving `package_staged`, `manifest_loaded`, `verified`, `written_to_A`, and `pending_reboot`.
 
-### AC5: Reboot Switches Active Slot On Successful Boot
+### AC7: Reboot Success Commits Pending Slot
 
-During reboot, the server simulates booting pending slot `A`.
-
-Expected success behavior:
-
-- Active slot changes from `B` to `A`.
-- Slot A boot status becomes `confirmed`.
-- Rollback slot remains `B`.
-- Persistent state records successful upgrade.
-
-Example verification command:
+Command:
 
 ```bash
 python3 -m ota_ab_sim.client reboot --boot-ok
 ```
 
-Expected status fields:
+Expected behavior:
 
-- `active_slot` is `A`
-- `active_version` matches the upgraded firmware version
-- `ota_state` is `boot_confirmed`
+- `active_slot` becomes `pending_slot`.
+- New active slot `status` becomes `good`.
+- Previous active slot remains `good`.
+- `pending_slot` and `pending_upgrade` become `null`.
+- Bootloader upgrade flags are cleared.
+- After booting into `A`, the next inactive target is `B`.
 
-### AC6: Boot Failure Rolls Back To Slot B
+### AC8: Boot Failure Rolls Back
 
-Boot failure must be simulated during reboot, after slot A has already been written and marked pending.
-
-Expected failure behavior:
-
-- The server attempts to boot pending slot `A`.
-- The simulated boot fails.
-- The server automatically rolls back active slot to `B`.
-- Rollback is persisted to state storage.
-- Slot A records a failed boot status.
-
-Example verification command:
+Command:
 
 ```bash
 python3 -m ota_ab_sim.client reboot --boot-fail
 ```
 
-Expected status fields:
+Expected behavior:
 
-- `active_slot` is `B`
-- `rollback_slot` is `B`
-- `slots.A.boot_status` is `failed`
-- `ota_state` is `rolled_back`
+- Active slot returns to `rollback_slot`.
+- Failed slot `status` becomes `failed`.
+- Previous slot remains `good`.
+- `pending_slot` and `pending_upgrade` become `null`.
+- `rollback_reason` is `boot_failed`.
+- Events include `reboot_started`, `boot_failed`, and `rolled_back`.
+- Rollback state persists after reloading `data/state.json`.
 
-### AC7: Client/Server Separation Is Real
-
-The client must use HTTP APIs for all operations.
+### AC9: Client/Server Separation Is Real
 
 Expected proof:
 
-- Server can be started as a separate process.
-- Client accepts a base URL such as `--server http://127.0.0.1:8000`.
-- Client implementation does not import server state storage modules for mutation.
-- Client does not open or write `data/state.json`.
-
-Example commands:
-
-```bash
-python3 -m ota_ab_sim.server --host 127.0.0.1 --port 8000
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
-```
+- Server starts as a separate HTTP process.
+- Client accepts `--server http://127.0.0.1:8000`.
+- Client does not import server state classes.
+- Client does not read or write `firmware/`, `data/staging/`, `data/slots/`, or `data/state.json`.
 
 ## Definition Of Done
 
-- All 7 assignment requirements are implemented.
-- All acceptance criteria above are demonstrable.
-- Tests cover success path, checksum failure, and rollback path.
-- Demo script shows initial slot `B`, target slot `A`, upgrade write to `A`, simulated boot failure, and persistent rollback to `B`.
+- `python3 -m unittest discover -s tests -v` passes.
+- Tests cover package staging, checksum failure, successful upgrade, failed boot rollback, path traversal rejection, and HTTP/CLI execution.
+- README and demo script show package-based one-shot and step-by-step flows.
+- `data/` does not enter git.

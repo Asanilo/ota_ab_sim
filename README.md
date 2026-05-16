@@ -2,11 +2,9 @@
 
 Small CLI plus HTTP server that simulates an OTA A/B partition upgrade flow.
 
-The initial active slot is `B`; the upgrade target slot is `A`.
+This project simulates the OTA control plane and A/B state machine. It does not implement a real bootloader or flash driver. A/B slots, package staging, checksum verification, boot result, and rollback are simulated with filesystem files and persistent JSON state.
 
-This project simulates the OTA control plane and A/B state machine. It does not implement a real bootloader or flash driver. A/B slots, firmware staging, checksum verification, boot result, and rollback are simulated with filesystem files and persistent JSON state.
-
-For the next engineering pass, see `ENGINEERING_ROADMAP.md`. It lists the package-directory firmware layout, manifest schema, staged-package flow, state fields, API/CLI changes, tests, and documentation updates for making the simulator closer to common embedded Linux OTA update patterns.
+The initial active slot is `B`; the first inactive upgrade slot is `A`.
 
 ## Run The Server
 
@@ -14,121 +12,118 @@ For the next engineering pass, see `ENGINEERING_ROADMAP.md`. It lists the packag
 python3 -m ota_ab_sim.server --host 127.0.0.1 --port 8000
 ```
 
-In another terminal, use the client:
+In another terminal:
 
 ```bash
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 ```
 
-## Firmware Repository
+## Firmware Packages
 
-The dummy firmware repository lives in `firmware_repo/`. It includes an `index.json` file with OTA-like metadata:
+Firmware packages live under `firmware/<package_id>/`:
 
-- `version`
-- `filename`
-- `size`
-- `md5`
-- `sha256`
-- `target_slot`
-- `compatible_model`
+```text
+firmware/
+  v2_success/
+    manifest.json
+    firmware.bin
+  v2_bad_md5/
+    manifest.json
+    firmware.bin
+  v2_bad_sha256/
+    manifest.json
+    firmware.bin
+```
 
-List it through the server, not by reading the folder from the client:
+Each `manifest.json` describes `package_id`, `version`, `compatible_model`, `slot_class`, and payload `filename`, `size`, `md5`, and `sha256`.
+
+List packages through the server:
 
 ```bash
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 firmware
 ```
 
-## Deterministic Demo Commands
-
-### 1. Status Check
+## One-Shot Demo
 
 ```bash
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reset
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
-```
-
-Expected highlights:
-
-- `active_slot` is `B`
-- `current_version` is `1.0.0`
-- `slot_versions` shows `A: null` and `B: 1.0.0`
-- `target_slot` is `A`
-- `pending_upgrade` is `null`
-
-### 2. Successful Upgrade From B To A
-
-```bash
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reset
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade firmware_v2.bin
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade v2_success
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reboot --boot-ok
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 ```
 
+`upgrade v2_success` internally runs:
+
+```text
+stage -> read staged manifest -> verify staged firmware.bin -> write inactive slot -> pending boot
+```
+
 Expected highlights:
 
-- Upgrade copies firmware from `firmware_repo/` to `data/staging/`.
-- MD5 and SHA256 are calculated from actual staged file contents.
-- Slot `A` is written only after both checks pass by copying to `data/slots/A/firmware.bin`.
-- Status includes OTA step events such as `staged`, `verified`, `written_to_A`, and `pending_reboot`.
-- Before reboot, `active_slot` remains `B` and `pending_upgrade` is `A`.
-- After successful reboot, `active_slot` is `A` and `current_version` is `2.0.0`.
+- `data/staging/v2_success/manifest.json` and `firmware.bin` are created.
+- Verification reads the staged manifest and staged `firmware.bin`.
+- Slot `A` is written at `data/slots/A/firmware.bin`.
+- `pending_slot` and compatibility alias `pending_upgrade` are `A`.
+- Events include `package_staged`, `manifest_loaded`, `verified`, `written_to_A`, and `pending_reboot`.
+- After reboot success, `active_slot` is `A`, slot `A.status` is `good`, and the next inactive target is `B`.
 
-### 3. Checksum Failure
+## Step-By-Step Demo
 
 ```bash
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reset
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade firmware_bad_checksum.bin
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 firmware
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 stage v2_success
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 verify
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 install
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reboot --boot-ok
+```
+
+## Failure Demos
+
+Checksum failure:
+
+```bash
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reset
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade v2_bad_md5
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 ```
 
 Expected highlights:
 
-- `ota_state` is `verification_failed`
-- `last_error` mentions `MD5`
-- `slots.A.version` remains `null`
-- `pending_upgrade` remains `null`
+- `ota_state` is `verification_failed`.
+- `last_error` mentions `MD5`.
+- `data/slots/A/firmware.bin` is absent or unchanged.
 
-To show SHA256 failure specifically:
-
-```bash
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reset
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade firmware_bad_sha256.bin
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
-```
-
-Expected highlights:
-
-- `ota_state` is `verification_failed`
-- `last_error` mentions `SHA256`
-- `slots.A.version` remains `null`
-- `pending_upgrade` remains `null`
-
-### 4. Boot Failure And Rollback To B
+Boot failure rollback:
 
 ```bash
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reset
-python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade firmware_v2.bin
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade v2_success
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 reboot --boot-fail
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 ```
 
 Expected highlights:
 
-- Slot `A` was written and marked pending before reboot.
-- Boot failure is simulated during `POST /reboot`.
-- `active_slot` rolls back to `B`.
-- `pending_upgrade` is cleared.
-- `ota_state` is `rolled_back`.
-- Status includes `reboot_started`, `boot_failed`, `rolled_back`, `boot_attempts`, `rollback_reason`, and `boot_failed_at_reboot`.
+- `active_slot` is restored to `B`.
+- Attempted slot `A.status` is `failed`.
+- `pending_slot` is `null`.
+- `rollback_reason` is `boot_failed`.
+- Events include `reboot_started`, `boot_failed`, and `rolled_back`.
 
 ## HTTP API
 
-```bash
-curl -s http://127.0.0.1:8000/status
-curl -s -X POST http://127.0.0.1:8000/upgrade -H 'Content-Type: application/json' -d '{"firmware":"firmware_v2.bin"}'
-curl -s -X POST http://127.0.0.1:8000/reboot -H 'Content-Type: application/json' -d '{"simulate_boot_failure":false}'
-curl -s -X POST http://127.0.0.1:8000/reset -H 'Content-Type: application/json' -d '{}'
+```text
+GET  /status
+GET  /firmware
+POST /stage    {"package": "v2_success"}
+POST /verify   {}
+POST /install  {}
+POST /upgrade  {"package": "v2_success"}
+POST /reboot   {"simulate_boot_failure": true}
+POST /reset    {}
 ```
 
 ## Tests
@@ -139,4 +134,4 @@ This project uses standard-library `unittest`.
 python3 -m unittest discover -s tests -v
 ```
 
-The suite includes service-level persistence tests, a static client/server separation test, and an HTTP/CLI test that starts a real local server.
+The suite includes package staging, staged-file verification, checksum failures, inactive slot writes, reboot rollback, path traversal rejection, static client/server separation, and HTTP/CLI subprocess tests.

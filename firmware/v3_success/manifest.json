@@ -1,0 +1,12 @@
+{
+  "package_id": "v3_success",
+  "version": "3.0.0",
+  "compatible_model": "demo-board",
+  "slot_class": "rootfs",
+  "payload": {
+    "filename": "firmware.bin",
+    "size": 19,
+    "md5": "27a54b44e2d9be52d4630b1e468d6744",
+    "sha256": "38ed1082f905fe6b35217af730c87f2cd545bf5025a5eabeffcb90f8ba824e83"
+  }
+}

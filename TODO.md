@@ -69,3 +69,18 @@
 - [x] Capture outputs showing active slot `B`, target slot `A`, pending slot `A`, and rollback to `B`.
 - [x] Run all tests.
 - [x] Confirm every assignment requirement maps to a command, test, or status field.
+
+## Phase 7: Package Directory OTA Refactor
+
+- [x] Add `firmware/<package_id>/manifest.json` and `firmware.bin` package layout.
+- [x] Stage by copying the whole package directory to `data/staging/<package_id>/`.
+- [x] Verify by reading staged manifest and staged `firmware.bin`.
+- [x] Install only to the inactive slot.
+- [x] Add `pending_slot`, slot `status`, and `staged_package` state fields.
+- [x] Keep `pending_upgrade` compatibility alias.
+- [x] Keep `POST /upgrade` as one-shot `stage -> verify -> install`.
+- [x] Add `POST /stage`, `POST /verify`, and `POST /install`.
+- [x] Add CLI `stage`, `verify`, and `install` commands.
+- [x] Reject package ids with path traversal.
+- [x] Update README, ARCHITECTURE, SPEC, demo_script, TODO, and AI_LOG.
+- [x] Add tests for staged package copy, staged-file verification, inactive slot write, path traversal, one-shot CLI, and step-by-step CLI.
