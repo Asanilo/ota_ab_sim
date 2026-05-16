@@ -563,3 +563,50 @@ OK
 - 没有 `data/` 进入 git；只有 `__pycache__/` 被 ignored。
 - `find data -maxdepth 3 -type f -print` 返回 `data` 不存在。
 - 本轮改动未提交。
+
+### TURN-8 最终优化与 GitHub 推送前验证
+
+**工作内容**
+
+- 创建并推送 GitHub 仓库：`https://github.com/Asanilo/ota_ab_sim`
+- 更新 `ARCHITECTURE.md`，让架构文档与当前实现一致。
+- 支持二次升级：成功 boot 到 `A` 后，下一次 `target_slot` 变为 `B`。
+- 使用 `firmware_repo/index.json` 做固件白名单校验，未列入 index 的固件会被拒绝。
+
+**最终实现 commit**
+
+```text
+16ba44b feat: support indexed OTA upgrades
+```
+
+**测试命令**
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+**测试结果**
+
+```text
+Ran 10 tests in 1.431s
+OK
+```
+
+**Git 状态命令**
+
+```bash
+git status --short --ignored
+```
+
+**Git 状态结果**
+
+```text
+!! ota_ab_sim/__pycache__/
+!! tests/__pycache__/
+```
+
+说明：
+
+- 没有未提交源码改动。
+- `data/` 没有进入 git 状态。
+- 只有 Python 缓存目录被 `.gitignore` 忽略。
