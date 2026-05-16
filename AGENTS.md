@@ -44,8 +44,8 @@ Before implementation, keep these documents current:
 
 - `SPEC.md`: acceptance criteria and evaluator-visible behavior.
 - `ARCHITECTURE.md`: C/S boundaries, APIs, data model, and state machine.
-- `TODO.md`: implementation tasks.
-- `AI_LOG.md`: AI-assisted development log.
+- `docs/TODO.md`: implementation tasks.
+- `docs/AI_LOG.md`: AI-assisted development log.
 - `demo_script.md`: screen recording or demo flow.
 
 ## Testing Rules
@@ -58,7 +58,6 @@ Before implementation, keep these documents current:
 
 ## AI-Assisted Development Rules
 
-- Record meaningful AI prompts, decisions, and generated artifacts in `AI_LOG.md`.
+- Record meaningful AI prompts, decisions, and generated artifacts in `docs/AI_LOG.md`.
 - Keep AI usage honest and specific.
 - Do not claim a requirement is complete until there is a command, test, or status field proving it.
-

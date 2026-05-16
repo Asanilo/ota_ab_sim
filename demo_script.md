@@ -167,7 +167,7 @@ Expected output still shows:
 ## 9. Show AI-Assisted Development Evidence
 
 ```bash
-sed -n '1,260p' AI_LOG.md
+sed -n '1,260p' docs/AI_LOG.md
 ```
 
 Point out:

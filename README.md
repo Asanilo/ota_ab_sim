@@ -142,3 +142,12 @@ python3 -m unittest discover -s tests -v
 ```
 
 The suite includes package staging, staged-file verification, checksum failures, inactive slot writes, reboot rollback, path traversal rejection, static client/server separation, and HTTP/CLI subprocess tests.
+
+## Supporting Documents
+
+Development history and implementation roadmaps live under `docs/`:
+
+- `docs/AI_LOG.md`
+- `docs/TODO.md`
+- `docs/ENGINEERING_ROADMAP.md`
+- `docs/CLI_OUTPUT_ROADMAP.md`
