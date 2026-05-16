@@ -16,7 +16,7 @@ from ota_ab_sim.server import make_handler
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def write_package(repo: Path, package_id: str, version: str, content: bytes):
+def write_package(repo: Path, package_id: str, version: str, content: bytes, bad_md5: bool = False):
     package_dir = repo / package_id
     package_dir.mkdir()
     (package_dir / "firmware.bin").write_bytes(content)
@@ -28,7 +28,7 @@ def write_package(repo: Path, package_id: str, version: str, content: bytes):
         "payload": {
             "filename": "firmware.bin",
             "size": len(content),
-            "md5": hashlib.md5(content).hexdigest(),
+            "md5": "bad-md5" if bad_md5 else hashlib.md5(content).hexdigest(),
             "sha256": hashlib.sha256(content).hexdigest(),
         },
     }
@@ -46,6 +46,7 @@ class HttpClientServerTests(unittest.TestCase):
         self.repo = self.base_dir / "firmware"
         self.repo.mkdir()
         write_package(self.repo, "v2_success", "2.0.0", b"firmware version 2\n")
+        write_package(self.repo, "v2_bad_md5", "9.9.9", b"corrupted firmware\n", bad_md5=True)
 
         service = OtaService(self.base_dir)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
@@ -59,16 +60,19 @@ class HttpClientServerTests(unittest.TestCase):
         self.thread.join(timeout=2)
         self.tmp.cleanup()
 
-    def run_client(self, *args, expect_success=True):
+    def run_client(self, *args, expect_success=True, json_output=True):
+        command = [
+            sys.executable,
+            "-m",
+            "ota_ab_sim.client",
+            "--server",
+            self.server_url,
+        ]
+        if json_output:
+            command.append("--json")
+        command.extend(args)
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "ota_ab_sim.client",
-                "--server",
-                self.server_url,
-                *args,
-            ],
+            command,
             cwd=PROJECT_ROOT,
             text=True,
             capture_output=True,
@@ -78,17 +82,18 @@ class HttpClientServerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         else:
             self.assertNotEqual(result.returncode, 0)
-        return parse_json(result.stdout)
+        return parse_json(result.stdout) if json_output else result.stdout
 
     def test_firmware_command_lists_package_manifest_fields(self):
         response = self.run_client("firmware")
+        packages = {package["package_id"]: package for package in response["firmware"]}
+        package = packages["v2_success"]
 
-        self.assertEqual(response["firmware"][0]["package_id"], "v2_success")
-        self.assertEqual(response["firmware"][0]["version"], "2.0.0")
-        self.assertEqual(response["firmware"][0]["compatible_model"], "demo-board")
-        self.assertEqual(response["firmware"][0]["slot_class"], "rootfs")
-        self.assertEqual(response["firmware"][0]["payload"]["filename"], "firmware.bin")
-        self.assertEqual(response["firmware"][0]["payload"]["size"], len(b"firmware version 2\n"))
+        self.assertEqual(package["version"], "2.0.0")
+        self.assertEqual(package["compatible_model"], "demo-board")
+        self.assertEqual(package["slot_class"], "rootfs")
+        self.assertEqual(package["payload"]["filename"], "firmware.bin")
+        self.assertEqual(package["payload"]["size"], len(b"firmware version 2\n"))
 
     def test_cli_one_shot_upgrade_talks_to_real_http_server(self):
         reset = self.run_client("reset")
@@ -129,6 +134,48 @@ class HttpClientServerTests(unittest.TestCase):
         reboot = self.run_client("reboot", "--boot-ok")
         self.assertEqual(reboot["state"]["active_slot"], "A")
         self.assertEqual(reboot["state"]["slots"]["A"]["status"], "good")
+
+    def test_default_status_output_is_human_readable_and_colored(self):
+        self.run_client("reset")
+
+        output = self.run_client("status", json_output=False)
+
+        self.assertIn("\x1b[", output)
+        self.assertIn("Device status", output)
+        self.assertIn("active slot", output)
+        self.assertIn("current version", output)
+
+    def test_default_upgrade_success_output_summarizes_pipeline(self):
+        self.run_client("reset")
+
+        output = self.run_client("upgrade", "v2_success", json_output=False)
+
+        self.assertIn("Upgrade staged, verified, and installed", output)
+        self.assertIn("wrote slot : A", output)
+        self.assertIn("next step  : reboot", output)
+
+    def test_default_upgrade_failure_output_says_slot_write_blocked(self):
+        self.run_client("reset")
+
+        output = self.run_client("upgrade", "v2_bad_md5", expect_success=False, json_output=False)
+
+        self.assertIn("Upgrade failed", output)
+        self.assertIn("MD5 mismatch", output)
+        self.assertIn("slot write : blocked", output)
+
+    def test_default_reboot_outputs_are_human_readable(self):
+        self.run_client("reset")
+        self.run_client("upgrade", "v2_success")
+
+        success = self.run_client("reboot", "--boot-ok", json_output=False)
+        self.assertIn("Boot confirmed", success)
+        self.assertIn("active slot", success)
+
+        self.run_client("reset")
+        self.run_client("upgrade", "v2_success")
+        failure = self.run_client("reboot", "--boot-fail", json_output=False)
+        self.assertIn("Boot failed, rolled back", failure)
+        self.assertIn("reason        : boot_failed", failure)
 
 
 class ClientSeparationTests(unittest.TestCase):

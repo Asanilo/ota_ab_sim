@@ -731,3 +731,193 @@ sed -n '260,620p' ENGINEERING_ROADMAP.md
 - tracked diff 很小：README 新增 roadmap 链接；AI_LOG TURN-8 标题有轻微修改。
 - `ENGINEERING_ROADMAP.md` 是新文件，内容覆盖下一轮 package-based OTA A/B refactor。
 - 本轮准备提交这些文档改动。
+
+### TURN-10 Final Package-Based OTA Verification
+
+**工作内容**
+
+- 检查最终提交后的 package-based OTA A/B simulator 完成度。
+- 核对 GitHub remote、最新 commit、工作区状态、测试结果、代码实现和文档一致性。
+- 回答最终交付前 reviewer 问题：当前是否覆盖 `ENGINEERING_ROADMAP.md` 的核心要求，是否还存在影响提交的缺口。
+
+**给 AI 的提示词 / 请求**
+
+```text
+检查目前的项目，完成度如何？
+
+已按 ENGINEERING_ROADMAP.md 完成并推送到 GitHub：
+https://github.com/Asanilo/ota_ab_sim
+
+最新提交：
+39e90d5 feat: add package-based OTA flow
+
+完成内容：
+- firmware/<package_id>/manifest.json + firmware.bin 包目录结构。
+- stage 复制整个 package directory 到 data/staging/<package_id>/。
+- verify 读取 staged manifest 和 staged firmware.bin。
+- install 只写 inactive slot 到 data/slots/<slot>/firmware.bin。
+- state 增加 pending_slot、slot status、staged_package、bootloader，并保留兼容别名。
+- 保留 POST /upgrade 一键流程，内部执行 stage -> verify -> install。
+- 新增 POST /stage、POST /verify、POST /install 和 CLI stage/verify/install。
+- 增加 package id path traversal 测试。
+- 更新 README.md、ARCHITECTURE.md、SPEC.md、demo_script.md、TODO.md、AI_LOG.md。
+- 删除旧 firmware_repo/ 平铺固件模型。
+
+验证结果：
+python3 -m unittest discover -s tests -v
+Ran 13 tests in 2.318s
+OK
+```
+
+**AI 产出**
+
+- 审查结论：当前项目已经从基础流程模拟升级为 package directory + manifest + staging + inactive slot + boot/rollback state machine 的 OTA A/B simulator。
+- 代码审查：确认 `ota_ab_sim/ota.py` 实现 package staging、manifest validation、staged payload checksum、inactive-slot install、one-shot upgrade、reboot commit 和 rollback。
+- API/CLI 审查：确认 `server.py` 暴露 `/stage`、`/verify`、`/install`、`/upgrade`、`/reboot`、`/reset`；`client.py` 对应提供 `stage`、`verify`、`install`、`upgrade`、`reboot`、`reset`。
+- 测试审查：确认测试覆盖 package staging、staged-file verification、MD5/SHA256 failure、path traversal rejection、inactive slot write、second upgrade writes inactive B、HTTP/CLI subprocess flow。
+- 文档审查：确认 README、ARCHITECTURE、SPEC、demo_script 已描述 package-based OTA flow。
+- 发现的文档清理项：`TODO.md` 前半部分仍记录 early flat `firmware_repo/` baseline；`AI_LOG.md` 需要追加最终验证记录；`demo_script.md` 可以更明确展示 C/S 架构边界。
+
+**人工判断和修改**
+
+- 接受保留 `TODO.md` 的历史阶段，但将 Phase 0-6 标注为 early baseline，明确 Phase 7 是最终 package-based OTA refactor。
+- 接受追加本 TURN-10，记录最终 commit、测试结果、Git 状态、实现范围和文档清理。
+- 接受增强 `demo_script.md`，增加 HTTP server proof、client/server static boundary proof、最终测试与 git status proof。
+- 不再扩大实现范围，不引入数据库、Docker、前端框架、真实 bootloader 或真实 flash partition。
+
+**验证方式**
+
+```bash
+git status --short --ignored
+git log --oneline --decorate -8
+python3 -m unittest discover -s tests -v
+rg --files
+nl -ba ota_ab_sim/ota.py
+nl -ba tests/test_ota_flow.py
+nl -ba tests/test_http_api.py
+nl -ba README.md
+nl -ba ARCHITECTURE.md
+nl -ba SPEC.md
+nl -ba demo_script.md
+```
+
+验证结果：
+
+- 最新本地与 remote commit 一致：
+
+```text
+39e90d5 (HEAD -> master, origin/master) feat: add package-based OTA flow
+```
+
+- 测试通过：
+
+```text
+Ran 13 tests in 2.178s
+OK
+```
+
+- `git status --short --ignored` 只显示 ignored Python cache directories：
+
+```text
+!! ota_ab_sim/__pycache__/
+!! tests/__pycache__/
+```
+
+- reviewer 判断：当前实现满足笔试核心要求，并覆盖 package-based engineering roadmap 的主要验收项。
+
+### TURN-11 CLI Human-Readable Output Roadmap
+
+**工作内容**
+
+- 审查当前 CLI 输出方式。
+- 确认当前已有一键升级命令 `upgrade <package>`，但默认输出是完整 JSON，观感不够像常规 OTA CLI。
+- 编写 `CLI_OUTPUT_ROADMAP.md`，作为交给 coder 的下一轮明确实现提示词。
+
+**给 AI 的提示词 / 请求**
+
+```text
+检查是否有一键升级的指令吗？
+一键升级成功和失败是否会有提示吗？
+CLI 的提示能做得美观一点吗？
+把这次 JSON 输出修改写成提示词，我会交给 coder，然后记录此次 LOG。
+```
+
+**AI 产出**
+
+- 判断：当前已经有一键升级命令：
+
+```bash
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 upgrade v2_success
+```
+
+- 判断：当前一键升级成功/失败会通过 JSON 字段体现，但默认 CLI 没有人类可读摘要。
+- 文档：新增 `CLI_OUTPUT_ROADMAP.md`，要求：
+  - 默认输出改为简洁的人类可读文本。
+  - 增加全局 `--json` 参数，保留完整 JSON 输出给测试和验收。
+  - `upgrade v2_success` 成功时输出 staged、verified、installed、wrote slot、next step。
+  - `upgrade v2_bad_md5` 失败时输出错误原因和 `slot write : blocked`。
+  - `reboot --boot-ok` 和 `reboot --boot-fail` 有明确成功/回滚提示。
+  - 更新测试覆盖 JSON 模式和默认人类可读模式。
+
+**人工判断和修改**
+
+- 接受保留 `POST /upgrade` 和 CLI `upgrade <package>` 作为一键升级入口。
+- 接受默认输出面向录屏和使用者，完整 JSON 改为通过 `--json` 显式请求。
+- 明确 client 仍然只能打印 server 返回的信息，不能为了格式化输出去读取 `firmware/`、`data/staging/`、`data/slots/` 或 `data/state.json`。
+- 本轮只写 coder roadmap，不修改 CLI 实现代码。
+
+**验证方式**
+
+```bash
+sed -n '1,240p' ota_ab_sim/client.py
+rg -n "upgrade|--json|print_json|stage|verify|install" README.md demo_script.md SPEC.md TODO.md AI_LOG.md ota_ab_sim/client.py tests
+git status --short
+```
+
+验证结果：
+
+- 当前 `client.py` 已支持 `upgrade <package>`、`stage`、`verify`、`install`、`reboot`。
+- 当前 `client.py` 仍默认调用 `print_json(payload)` 输出完整 JSON。
+- `CLI_OUTPUT_ROADMAP.md` 已创建，包含输出示例、实现建议、测试要求和验收清单。
+
+### TURN-12 CLI Default Human Output
+
+**工作内容**
+
+- 按 `CLI_OUTPUT_ROADMAP.md` 实现 CLI 默认人类可读输出。
+- 增加全局 `--json`，保留完整 JSON 输出给测试和验收。
+- 默认输出增加 ANSI 色彩提示，不引入第三方库。
+
+**给 AI 的提示词 / 请求**
+
+```text
+CLI_OUTPUT_ROADMAP.md 实现CLI默认输出，CLI提示带上色彩。
+```
+
+**AI 产出**
+
+- 代码：更新 `ota_ab_sim/client.py`，增加 formatter、`--json`、默认彩色摘要输出。
+- 测试：更新 `tests/test_http_api.py`，JSON 模式显式传 `--json`，新增默认输出文本和彩色提示断言。
+- 文档：更新 `README.md` 和 `demo_script.md`，说明默认输出和 `--json`。
+
+**人工判断和修改**
+
+- 保持 client 只调用 HTTP API，不读取 server-owned 文件。
+- 使用 ANSI escape code 实现颜色，不引入 terminal color library。
+- 默认输出面向录屏；`--json` 面向脚本化验证。
+
+**验证方式**
+
+```bash
+python3 -m unittest discover -s tests -v
+git status --short --ignored
+```
+
+验证结果：
+
+- 17 个测试全部通过：
+
+```text
+Ran 17 tests in 5.192s
+OK
+```

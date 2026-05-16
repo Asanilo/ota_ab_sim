@@ -2,14 +2,18 @@
 
 # OTA A/B Simulator Implementation TODO
 
-## Phase 0: Project Setup
+## Phase 0: Project Setup (Early Baseline)
+
+This phase records the first working baseline. The final implementation moved from the early flat `firmware_repo/` model to the package-based `firmware/<package_id>/manifest.json + firmware.bin` model in Phase 7.
 
 - [x] Create Python package layout for `ota_ab_sim`.
 - [x] Add a minimal standard-library `unittest` setup.
 - [x] Create `firmware_repo/` with dummy firmware and manifest files.
 - [x] Create initial persistent state under `data/state.json` through server initialization, not by client mutation.
 
-## Phase 1: State And Firmware Core
+## Phase 1: State And Firmware Core (Early Baseline)
+
+This phase records the first working baseline. Phase 7 supersedes the flat firmware repository details with package directory staging and staged-manifest verification.
 
 - [x] Implement state loading and saving.
 - [x] Implement initial state with active slot `B` and target slot `A`.
@@ -18,7 +22,9 @@
 - [x] Implement MD5 and SHA256 calculation.
 - [x] Implement manifest-based checksum verification.
 
-## Phase 2: OTA Flow Logic
+## Phase 2: OTA Flow Logic (Early Baseline)
+
+This phase records the first working OTA state machine. Phase 7 refines it with package staging, `pending_slot`, slot `status`, and inactive-slot selection.
 
 - [x] Implement `POST /upgrade`: stage, verify, write slot A, and mark pending.
 - [x] Implement verification failure transition: `staged -> verification_failed`.
@@ -28,7 +34,9 @@
 - [x] Implement reboot failure: slot A fails and active slot rolls back to `B`.
 - [x] Persist rollback state to `data/state.json`.
 
-## Phase 3: HTTP Server
+## Phase 3: HTTP Server (Early Baseline)
+
+This phase records the initial HTTP API. Phase 7 adds step-by-step `/stage`, `/verify`, and `/install` APIs while retaining `/upgrade`.
 
 - [x] Implement `GET /status`.
 - [x] Implement `GET /firmware`.
@@ -37,7 +45,9 @@
 - [x] Implement `POST /reset` for demo and tests.
 - [x] Return clear JSON errors for invalid transitions.
 
-## Phase 4: CLI Client
+## Phase 4: CLI Client (Early Baseline)
+
+This phase records the initial CLI surface. Phase 7 adds package-based `stage`, `verify`, and `install` commands.
 
 - [x] Implement `status` command through `GET /status`.
 - [x] Implement `firmware` command through `GET /firmware`.
@@ -47,7 +57,9 @@
 - [x] Implement `reset` command through `POST /reset`.
 - [x] Ensure client never opens or writes `data/state.json`.
 
-## Phase 5: Tests
+## Phase 5: Tests (Early Baseline)
+
+This phase records the first test suite. Phase 7 expands coverage for package directories, staged-file verification, path traversal rejection, inactive slot writes, and step-by-step CLI flow.
 
 - [x] Test initial active slot is `B`.
 - [x] Test MD5 and SHA256 success through successful upgrade.
@@ -61,7 +73,9 @@
 - [x] Test CLI talks to a real HTTP server.
 - [x] Test client source does not import or mutate server state files.
 
-## Phase 6: Demo And Evidence
+## Phase 6: Demo And Evidence (Early Baseline)
+
+This phase records the first demo documentation. Phase 7 updates the demo to the package-based OTA flow.
 
 - [x] Update `AI_LOG.md` with prompts, decisions, and verification evidence.
 - [x] Add deterministic demo commands to `README.md`.

@@ -18,6 +18,12 @@ In another terminal:
 python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 ```
 
+By default, the CLI prints concise human-readable output with ANSI color prompts. Use `--json` for the full evaluator-visible server response:
+
+```bash
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 --json status
+```
+
 ## Firmware Packages
 
 Firmware packages live under `firmware/<package_id>/`:
@@ -68,6 +74,7 @@ Expected highlights:
 - `pending_slot` and compatibility alias `pending_upgrade` are `A`.
 - Events include `package_staged`, `manifest_loaded`, `verified`, `written_to_A`, and `pending_reboot`.
 - After reboot success, `active_slot` is `A`, slot `A.status` is `good`, and the next inactive target is `B`.
+- Use `--json status` any time you need the full state fields.
 
 ## Step-By-Step Demo
 

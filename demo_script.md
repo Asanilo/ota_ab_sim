@@ -12,6 +12,29 @@ python3 -m ota_ab_sim.server --host 127.0.0.1 --port 8000
 
 Show that this is a real HTTP server process.
 
+Optional architecture proof in another terminal:
+
+```bash
+curl -s http://127.0.0.1:8000/status
+```
+
+Point out:
+
+- The server responds over HTTP.
+- The CLI will use `--server http://127.0.0.1:8000`.
+- State, firmware packages, staging, slot writes, reboot, and rollback are server-owned.
+
+Optional static boundary check:
+
+```bash
+rg -n "OtaService|state\.json|firmware/|data/staging|data/slots|copytree|copyfile|shutil" ota_ab_sim/client.py
+```
+
+Expected output:
+
+- No matches.
+- This shows the client does not import server state logic or access firmware/staging/slot files directly.
+
 ## 2. Reset And Inspect Initial State
 
 Terminal 2:
@@ -23,12 +46,19 @@ python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 status
 
 Point out:
 
+- Default CLI output is human-readable and color-highlighted for recording.
 - `active_slot: B`
 - `current_version: 1.0.0`
 - `target_slot: A`
 - `pending_slot: null`
 - `slots.B.status: good`
 - `slots.A.status: empty`
+
+Show full JSON once for evaluator-visible state fields:
+
+```bash
+python3 -m ota_ab_sim.client --server http://127.0.0.1:8000 --json status
+```
 
 ## 3. Show Firmware Packages
 
@@ -144,3 +174,16 @@ Point out:
 
 - Prompts and implementation turns are recorded.
 - Verification commands and results are recorded.
+
+## 10. Show Verification Evidence
+
+```bash
+python3 -m unittest discover -s tests -v
+git status --short --ignored
+```
+
+Point out:
+
+- Tests cover package staging, staged-file verification, checksum failure, inactive slot writes, rollback, path traversal rejection, and HTTP/CLI separation.
+- `data/` is runtime state and is not committed.
+- Only ignored Python cache directories should appear in git status.
