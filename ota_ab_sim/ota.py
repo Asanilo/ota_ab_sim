@@ -101,13 +101,17 @@ class OtaService:
         target_slot = state["target_slot"]
         source_path = self.repo_dir / firmware_name
         manifest_path = self.repo_dir / f"{firmware_name}.json"
+        index_entry = self._firmware_index_entry(firmware_name)
 
         if not source_path.exists():
             return self._fail(state, f"Firmware not found: {firmware_name}", "download_failed")
         if not manifest_path.exists():
             return self._fail(state, f"Firmware metadata not found: {firmware_name}.json", "download_failed")
+        if index_entry is None:
+            return self._fail(state, f"Firmware not listed in firmware_repo/index.json: {firmware_name}", "index_rejected")
 
         metadata = self._read_json(manifest_path)
+        metadata.update(index_entry)
         staged_path = self.staging_dir / firmware_name
         shutil.copyfile(source_path, staged_path)
 
@@ -193,6 +197,7 @@ class OtaService:
             state["slots"][pending_slot]["boot_status"] = "confirmed"
             state["active_slot"] = pending_slot
             state["rollback_slot"] = previous_slot
+            state["target_slot"] = previous_slot
             state["pending_upgrade"] = None
             state["ota_state"] = "boot_confirmed"
             state["rollback_reason"] = None
@@ -239,6 +244,16 @@ class OtaService:
     @staticmethod
     def _read_json(path):
         return json.loads(Path(path).read_text(encoding="utf-8"))
+
+    def _firmware_index_entry(self, firmware_name):
+        index_path = self.repo_dir / "index.json"
+        if not index_path.exists():
+            return None
+        index = self._read_json(index_path)
+        for entry in index.get("firmware", []):
+            if entry.get("filename") == firmware_name or entry.get("name") == firmware_name:
+                return entry
+        return None
 
     @classmethod
     def _file_metadata(cls, path):

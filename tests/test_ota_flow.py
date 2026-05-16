@@ -17,11 +17,20 @@ def write_firmware(
     firmware_path.write_bytes(content)
     metadata = {
         "name": name,
+        "filename": name,
         "version": version,
+        "size": len(content),
         "md5": "bad-md5" if bad_md5 else hashlib.md5(content).hexdigest(),
         "sha256": "bad-sha256" if bad_sha256 else hashlib.sha256(content).hexdigest(),
+        "target_slot": "A",
+        "compatible_model": "demo-board",
     }
     (repo / f"{name}.json").write_text(json.dumps(metadata), encoding="utf-8")
+    return metadata
+
+
+def write_index(repo: Path, entries):
+    (repo / "index.json").write_text(json.dumps({"firmware": entries}), encoding="utf-8")
 
 
 class OtaFlowTests(unittest.TestCase):
@@ -30,21 +39,24 @@ class OtaFlowTests(unittest.TestCase):
         self.base_dir = Path(self.tmp.name)
         self.repo = self.base_dir / "firmware_repo"
         self.repo.mkdir()
-        write_firmware(self.repo, "firmware_v2.bin", "2.0.0", b"firmware version 2\n")
-        write_firmware(
+        firmware_entries = []
+        firmware_entries.append(write_firmware(self.repo, "firmware_v2.bin", "2.0.0", b"firmware version 2\n"))
+        firmware_entries.append(write_firmware(self.repo, "firmware_v3.bin", "3.0.0", b"firmware version 3\n"))
+        firmware_entries.append(write_firmware(
             self.repo,
             "firmware_bad_checksum.bin",
             "9.9.9",
             b"corrupted firmware\n",
             bad_md5=True,
-        )
-        write_firmware(
+        ))
+        firmware_entries.append(write_firmware(
             self.repo,
             "firmware_bad_sha256.bin",
             "9.9.8",
             b"sha256 corrupted firmware\n",
             bad_sha256=True,
-        )
+        ))
+        write_index(self.repo, firmware_entries)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -166,6 +178,35 @@ class OtaFlowTests(unittest.TestCase):
         self.assertIsNone(persisted["pending_upgrade"])
         self.assertEqual(reloaded_status["active_slot"], "B")
         self.assertEqual(reloaded_status["ota_state"], "rolled_back")
+
+    def test_successful_boot_to_a_sets_next_target_to_b_for_second_upgrade(self):
+        service = self.make_service()
+
+        first_upgrade = service.upgrade("firmware_v2.bin")
+        first_reboot = service.reboot(simulate_boot_failure=False)
+        second_upgrade = service.upgrade("firmware_v3.bin")
+
+        self.assertTrue(first_upgrade["ok"])
+        self.assertEqual(first_reboot["state"]["active_slot"], "A")
+        self.assertEqual(first_reboot["state"]["target_slot"], "B")
+        self.assertTrue(second_upgrade["ok"])
+        self.assertEqual(second_upgrade["state"]["active_slot"], "A")
+        self.assertEqual(second_upgrade["state"]["pending_upgrade"], "B")
+        self.assertEqual(second_upgrade["state"]["slots"]["B"]["version"], "3.0.0")
+        self.assertEqual(second_upgrade["state"]["slots"]["B"]["boot_status"], "pending")
+        self.assertIn("written_to_B", second_upgrade["state"]["events"])
+
+    def test_upgrade_rejects_firmware_not_listed_in_index(self):
+        write_firmware(self.repo, "rogue.bin", "9.9.7", b"rogue firmware\n")
+        service = self.make_service()
+
+        result = service.upgrade("rogue.bin")
+        persisted = self.read_persisted_state()
+
+        self.assertFalse(result["ok"])
+        self.assertIn("index", result["state"]["last_error"])
+        self.assertIsNone(result["state"]["slots"]["A"]["version"])
+        self.assertEqual(persisted["ota_state"], "index_rejected")
 
 
 if __name__ == "__main__":
