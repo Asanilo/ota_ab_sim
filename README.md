@@ -6,6 +6,8 @@ The initial active slot is `B`; the upgrade target slot is `A`.
 
 This project simulates the OTA control plane and A/B state machine. It does not implement a real bootloader or flash driver. A/B slots, firmware staging, checksum verification, boot result, and rollback are simulated with filesystem files and persistent JSON state.
 
+For the next engineering pass, see `ENGINEERING_ROADMAP.md`. It lists the package-directory firmware layout, manifest schema, staged-package flow, state fields, API/CLI changes, tests, and documentation updates for making the simulator closer to common embedded Linux OTA update patterns.
+
 ## Run The Server
 
 ```bash

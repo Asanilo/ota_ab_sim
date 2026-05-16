@@ -564,7 +564,7 @@ OK
 - `find data -maxdepth 3 -type f -print` 返回 `data` 不存在。
 - 本轮改动未提交。
 
-### TURN-8 最终优化与 GitHub 推送前验证
+### TURN-8 优化与 GitHub 推送前验证
 
 **工作内容**
 
@@ -610,3 +610,67 @@ git status --short --ignored
 - 没有未提交源码改动。
 - `data/` 没有进入 git 状态。
 - 只有 Python 缓存目录被 `.gitignore` 忽略。
+
+### TURN-9 Reviewer Roadmap 文档审查与记录
+
+**工作内容**
+
+- 人工向 reviewer 提出下一轮工程化建议：
+  - 固件从“散文件 + json”升级为“固件包目录 + manifest”。
+  - staging 复制整个包，而不是只复制 bin。
+  - 状态字段更接近 OTA 状态机语言：`active_slot`、`pending_slot`、`rollback_slot`、slot status。
+  - `upgrade` 内部流程明确展示 `stage -> read manifest -> verify -> write inactive slot -> pending boot`。
+- reviewer 编写了 `ENGINEERING_ROADMAP.md`。
+- 检查文档 diff，判断该 roadmap 是否覆盖上述建议。
+
+**给 AI 的提示词 / 请求**
+
+```text
+给reviewer 提了以下内容：
+- 固件应该从“散文件 + json”升级为“固件包目录 + manifest”。
+- staging 应该复制整个包，而不是只复制 bin。
+- 状态字段应该更接近 OTA 状态机语言：active_slot、pending_slot、rollback_slot、slot status。
+- upgrade 内部流程应该明确展示：stage -> read manifest -> verify -> write inactive slot -> pending boot。
+
+```
+
+**AI 产出**
+
+- 文档：检查 `README.md` diff，确认 README 指向 `ENGINEERING_ROADMAP.md`。
+- 文档：检查新文件 `ENGINEERING_ROADMAP.md`，确认其覆盖 package directory、manifest schema、whole-package staging、`pending_slot`、slot `status`、bootloader-like state、step-by-step API 和测试要求。
+- 判断：该 roadmap 是下一轮工程计划，不是当前实现；当前代码仍是 `firmware_repo/firmware_v2.bin + .json` 的平铺模型。
+
+**人工判断和修改**
+
+- 接受保留 `ENGINEERING_ROADMAP.md`，因为它系统覆盖 reviewer 的四条工程化建议。
+- 明确 README 中 “For the next engineering pass” 的表述是准确的，避免把 roadmap 误说成已实现功能。
+- 要求提交时必须包含 `ENGINEERING_ROADMAP.md`，否则 README 会指向不存在的文件。
+- 后续给 coder 的范围建议：
+  - 必做：package dir + manifest、staging whole package、verify staged payload、write inactive slot、`pending_slot`/slot `status`。
+  - 可选：新增 `/stage`、`/verify`、`/install` 分步 API。
+  - 保留：`POST /upgrade` 一键流程，避免 demo 复杂化。
+- 注意目录命名迁移：roadmap 建议新目录为 `firmware/`，当前实现是 `firmware_repo/`；后续实现时不能混用导致 README、ARCHITECTURE 和测试不一致。
+
+**验证方式**
+
+```bash
+git status --short
+git diff --stat
+git diff -- README.md SPEC.md ARCHITECTURE.md TODO.md demo_script.md AI_LOG.md
+sed -n '1,260p' ENGINEERING_ROADMAP.md
+sed -n '260,620p' ENGINEERING_ROADMAP.md
+```
+
+验证结果：
+
+- 当前 diff 包含：
+
+```text
+ M AI_LOG.md
+ M README.md
+?? ENGINEERING_ROADMAP.md
+```
+
+- tracked diff 很小：README 新增 roadmap 链接；AI_LOG TURN-8 标题有轻微修改。
+- `ENGINEERING_ROADMAP.md` 是新文件，内容覆盖下一轮 package-based OTA A/B refactor。
+- 本轮准备提交这些文档改动。
